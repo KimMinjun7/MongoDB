@@ -1,0 +1,1318 @@
+1. MongoDB를 이용한 분산과 복제
+(1) mongodb 3.x 버전 설치, path 설정
+(2) 복제
+	1) Master & Slave
+		- 실습 폴더 준비
+			C:\mongolab
+			C:\mongolab\master
+			C:\mongolab\slave1
+			C:\mongolab\slave2
+
+		- 실습 노드 3개 준비
+			Master Node : port 10000
+			Slave1 Node : port 10001
+			Slave2 Node : port 10002
+
+		- 3대의 서버를 실행
+			mongod --dbpath c:\mongolab\master --port 10000 --master
+			mongod --dbpath c:\mongolab\slave1 --port 10001 --slave --source  localhost:10000
+			mongod --dbpath c:\mongolab\slave2 --port 10002 --slave --source  localhost:10000
+
+		- 서버와의 접속을 위해 클라이언트를 3대 준비 및 접속
+			콘솔창 3개 준비	
+			첫번째 창에는 mongo localhost:10000
+			두번째 창에는 mongo localhost:10001
+			세번째 창에는 mongo localhost:10002
+
+		- master 접속 창에서 작업
+			show collections 
+			db.test.insert({a : 100})
+			db.test.find()
+
+		- slave 접속 창에서 작업(1 또는 2)
+			db.setSlaveOk()
+			show collections
+			db.test.find()
+
+			db.test.insert({b : 200})
+
+		- 첫번째 slave(slave1)에 결함 발생
+			slave1에 접속 후 
+				use admin
+				db.shutdownServer()
+			또는
+			서버창에서 Ctrl + C
+
+			slave1 폴더 내의 내용을 모두 삭제
+
+			다시 slave1서버를 가동 후에 클라이언트에서 재접속
+
+
+	2) ReplicaSet
+		- 4대의 서버 준비 및 실행
+			mongod --dbpath c:\mongolab\disk1 --port 10001 --replSet rptmongo --oplogSize 10
+			mongod --dbpath c:\mongolab\disk2 --port 10002 --replSet rptmongo --oplogSize 10
+			mongod --dbpath c:\mongolab\disk3 --port 10003 --replSet rptmongo --oplogSize 10
+			mongod --dbpath c:\mongolab\disk4 --port 10004 --replSet rptmongo --oplogSize 10
+
+		- Primary 및 Arbiter 지정
+			클라이언트 창을 하나 준비하여 disk1서버에 접속
+			mongo localhost:10001 ( mongo localhost:10001/admin )
+			
+			use admin
+
+			db.runCommand({ "replSetInitiate" : {"_id" : "rptmongo", "members" : 
+					[
+						{"_id" : 1, "host" : "localhost:10001"}, 
+						{"_id" : 2, "host" : "localhost:10002"},
+						{"_id" : 3, "host" : "localhost:10003"},
+						{"_id" : 4, "host" : "localhost:10004", arbiterOnly:true}
+					] } 
+				})
+			
+			각 서버에 접속하여 프롬프트를 통해 역할 확인
+
+		- primary창으로 가서 간단한 데이터 입력
+			use test
+			db.test.insert({a : 100})
+			
+			나머지 secondary에서 확인
+			use test
+			db.setSlaveOk()
+			db.test.find()
+
+		- primary에서 결함 발생
+			primary 클라이언트에 접속 후 
+				use admin
+				db.shutdownServer()
+			또는
+			서버창에서 Ctrl + C
+
+			각각 secondary 확인
+
+			primary서버를 가동 후 클라이언트에서 확인
+
+(3) 분산
+	1) Config Server 생성 및 실행
+		- 3대의 서버 준비(ReplicaSet으로 구현)
+			폴더 생성
+			C:\mongolab\shard\config1
+			C:\mongolab\shard\config2
+			C:\mongolab\shard\config3
+
+			서버 실행
+			mongod --configsvr --replSet  configRep1 --dbpath C:\mongolab\shard\config1 --port 20001
+			mongod --configsvr --replSet  configRep1 --dbpath C:\mongolab\shard\config2 --port 20002
+			mongod --configsvr --replSet  configRep1 --dbpath C:\mongolab\shard\config3 --port 20003
+	
+		- Config Server의 Primary 설정(여기서는 20001 서버를 지정)
+			클라이언트 창을 하나 열고	mongo localhost:20001  으로 접속
+
+			var config = {"_id" : "configRep1", "members" : 
+					[
+						{"_id" : 0, "host" : "localhost:20001"}, 
+						{"_id" : 1, "host" : "localhost:20002"},
+						{"_id" : 2, "host" : "localhost:20003"},
+					]}
+
+			rs.initiate(config)
+
+
+	2) Shard Server 준비 및 실행
+		- 각각 3대씩 하나로 묶어서 구성
+			C:\mongolab\shard\shard1\shardRep1
+			C:\mongolab\shard\shard1\shardRep2
+			C:\mongolab\shard\shard1\shardRep3
+
+			C:\mongolab\shard\shard2\shardRep1
+			C:\mongolab\shard\shard2\shardRep2
+			C:\mongolab\shard\shard2\shardRep3
+
+			C:\mongolab\shard\shard3\shardRep1
+			C:\mongolab\shard\shard3\shardRep2
+			C:\mongolab\shard\shard3\shardRep3
+
+		- Shard Server 실행
+			mongod --shardsvr --replSet shardRep1 --dbpath C:\mongolab\shard\shard1\shardRep1 --port 30011
+			mongod --shardsvr --replSet shardRep1 --dbpath C:\mongolab\shard\shard1\shardRep2 --port 30012
+			mongod --shardsvr --replSet shardRep1 --dbpath C:\mongolab\shard\shard1\shardRep3 --port 30013
+
+			mongod --shardsvr --replSet shardRep2 --dbpath C:\mongolab\shard\shard2\shardRep1 --port 30021
+			mongod --shardsvr --replSet shardRep2 --dbpath C:\mongolab\shard\shard2\shardRep2 --port 30022
+			mongod --shardsvr --replSet shardRep2 --dbpath C:\mongolab\shard\shard2\shardRep3 --port 30023
+
+			mongod --shardsvr --replSet shardRep3 --dbpath C:\mongolab\shard\shard3\shardRep1 --port 30031
+			mongod --shardsvr --replSet shardRep3 --dbpath C:\mongolab\shard\shard3\shardRep2 --port 30032
+			mongod --shardsvr --replSet shardRep3 --dbpath C:\mongolab\shard\shard3\shardRep3 --port 30033
+
+		- 각각 ReplicaSet 설정
+			mongo localhost:30011
+
+			var config = {"_id" : "shardRep1", "members" : 
+					[
+						{"_id" : 0, "host" : "localhost:30011"}, 
+						{"_id" : 1, "host" : "localhost:30012"},
+						{"_id" : 2, "host" : "localhost:30013"},
+					]}
+
+			rs.initiate(config)
+			---------------------------------------------------------------------------
+			mongo localhost:30021
+
+			var config = {"_id" : "shardRep2", "members" : 
+					[
+						{"_id" : 0, "host" : "localhost:30021"}, 
+						{"_id" : 1, "host" : "localhost:30022"},
+						{"_id" : 2, "host" : "localhost:30023"},
+					]}
+
+			rs.initiate(config)
+			---------------------------------------------------------------------------
+			mongo localhost:30031
+
+			var config = {"_id" : "shardRep3", "members" : 
+					[
+						{"_id" : 0, "host" : "localhost:30031"}, 
+						{"_id" : 1, "host" : "localhost:30032"},
+						{"_id" : 2, "host" : "localhost:30033"},
+					]}
+
+			rs.initiate(config)
+
+	3) Router Server 준비 및 실행
+		- Config Server 등록
+			mongos --configdb  configRep1/localhost:20001,localhost:20002,localhost:20003
+
+		- Shard Server 등록
+			mongo localhost:27017
+
+			sh.addShard("shardRep1/localhost:30011")
+			sh.addShard("shardRep2/localhost:30021")
+			sh.addShard("shardRep3/localhost:30031")
+
+	4) DB 및 인덱스 생성
+		현재는 라우터 서버에 접속되어 있는 상태(클라이언트)
+
+		- DB 생성
+			sh.enableSharding("testdb")
+			또는
+			db.runCommand({enableSharding : "testdb"})
+
+		- 인덱스 생성 및 동작 설정
+			use testdb
+			db.thing.createIndex({empno:1})
+
+			동작 설정
+			use admin
+			sh.shardCollection("testdb.thing", {empno : "hashed"})
+			
+	5) Testing
+		mongo localhost:27017
+
+		use testdb
+		
+		for(var n=100000 ; n < 110000 ; n++) {
+			db.thing.insert({empno : n, ename : "test", sal : 1000})
+		}
+
+		db.thing.count()
+
+		각 서버에서 확인
+		mongo localhost:30011
+		use testdb
+		db.thing.count()
+
+		mongo localhost:30021
+		use testdb
+		db.thing.count()
+
+		mongo localhost:30031
+		use testdb
+		db.thing.count()
+
+
+
+2. 리눅스(Linux)
+(1) 가상화 프로그램
+	1) VM Ware
+		- Workstation Pro
+		- Player
+
+	2) VirtualBox : Oracle
+
+	3) Hyper-V
+
+(2) 기본 프로그램 준비
+	1) putty
+	2) winscp
+
+
+(3) 사용법
+	1) 기본 명령어1
+		dir
+		ls	ls -l(long)		ll	ls -a(all)		ls -la
+		cd ..	cd /
+
+
+	2) 원격 연결
+		- putty 사용
+			ifconfig 를 통해 서버 아이피 확인
+
+		- winscp 사용
+	
+	3) 기본 구조
+		home : 각 일반 계정별 공간
+		root : 관리자의 고유 공간
+		etc : config, passwd, ...
+		lib : shared library
+		usr : 각 사용자들이 사용할 수 있는 디렉토리들
+		var : 주로 로그파일과 같이 크기가 늘어나는 파일들
+		...
+	
+	4) 기본 명령어2
+		- touch : 파일 생성
+			touch 파일명
+			-------------------------
+			touch test.txt
+
+			gedit test.txt
+			vi test.txt
+
+		- cat : 파일의 내용 출력, head, tail
+			cat test.txt
+			head -3 test.txt
+
+		- echo : 출력
+			echo "I love linux"
+			echo "I love linux" > test.txt
+			echo "I love linux" >> test.txt
+
+		- mkdir, rmdir
+			mkdir dir1
+			mkdir dir2 dir3
+			mkdir dir1/dir1-1 dir1/dir1-2
+			ll dir1/
+			rmdir dir2 dir3
+
+		- cp, mv, rm
+			cp test.txt dir1/
+			ll dir1/
+			rmdir dir1 : 디렉토리가 비워져있지 않기 때문에 삭제 불가
+			rm test.txt
+			rm -rf dir1
+
+		- 검색 : find(파일), which(프로그램)
+			touch test.txt
+			루트로 이동 : cd /
+			find test.txt : 현재 위치에서 검색
+			find root/ -name test.txt
+			find / -name test.txt
+
+			which java
+			which python			
+
+	5) 사용자 및 그룹관리
+		- 사용자 추가
+			useradd user2
+			user2의 home 디렉토리 확인
+
+			사용자 계정과 패스워드 등의 정보 확인
+			vi /etc/passwd
+			사용자이름 : 암호 : 사용자아이디 : 소속그룹 : 전체이름 : 홈디렉토리 : 기본 쉘
+
+			비밀번호 확인
+			vi /etc/shadow
+			!! 은 비밀번호가 설정되지 않음을 표시
+
+			비밀번호 설정
+			passwd user2
+
+			접속자 전환(switch user)
+			su 사용자아이디
+
+		- 사용자 그룹
+			그룹정보 확인
+			cat /etc/group
+
+			그룹 생성
+			groupadd centosGroup
+				
+			그룹정보 마지막부터 5개 확인
+			tail -5 /etc/group
+
+			사용자를 추가하면서 가입시키기
+			useradd -g centosGroup user3
+			useradd -g centosGroup user4
+
+			home directory안에서 조회 (ls -l)
+
+			이미 추가되어있는 사용자를 그룹에 가입 시키기
+			usermod -aG centosGroup user2
+
+		- 사용자 및 그룹 삭제
+			userdel user2
+
+			home directory 조회
+
+			사용자 디렉토리 삭제
+			rmdir user2 ( 디렉토리가 비어있을때)
+			rm -rf user2 ( 디렉토리가 비어있지 않을때)
+
+			userdel -r user3
+			userdel -r user4
+
+			groupdel centosGroup
+
+
+	6) 사용 권한
+		- 권한의 종류
+			소유권
+			허가권
+
+		- 허가권(permission) : rwxrwxrwx : 현재 사용자권한, 그룹 사용자권한, 기타 사용자권한
+			home 디렉토리에서 작업
+			-------------------------------
+			현재 위치에서 파일 생성 : test.txt (내용도 간단히 입력)
+			touch test.txt
+			echo "abcdefg" > test.txt
+			ll
+			------------------------------
+			-rw-r--r--. 1 root root 8 ....
+
+			-/d : 디렉토리 구분
+			rw- : 현재 사용자 권한
+			r-- : 그룹 사용자
+			r-- : 기타 사용자
+			root : 소유자
+			root : 그룹명
+
+			디렉토리 생성
+			mkdir abc
+			ll
+
+			su user1
+			touch test.txt
+
+			exit
+
+			chmod 777 abc
+
+			su user1
+			cd abc
+			touch test.txt
+
+			exit
+			
+			chmod 755 abc
+
+		- 소유권(Ownership)
+			chown user1 abc
+
+			su user1
+			cd abc
+			touch test2.txt
+
+			su user2
+			cd abc
+			touch test3.txt
+
+			소유 그룹 변경
+			exit
+			chgrp user1 abc
+
+			exit (root 접속)
+			cd abc
+			touch test3.txt
+
+
+	7) 하드 링크, 심볼릭 링크
+		cd /home/user1
+		touch basefile
+		echo "abcdefg" > basefile
+		
+		하드링크 생성
+		cd ~
+		ln /home/user1/basefile hardlink
+		cat hardlink
+
+		심볼릭 링크 생성
+		ln -s /home/user1/basefile softlink
+		cat softlink
+
+		ls -il
+		ls -il /home/user1/basefile
+
+		basefile 삭제
+		rm /home/user1/basefile
+		cat hardlink
+		cat softlink
+
+	8) 프로세스
+		- ps
+			e(every) : 현재 실행중인 모든 프로세스 표시
+			f(full) : 현재 실행중인 프로세스의 상세 정보
+
+		- 프로세스 중지
+			kill 프로세스 아이디(PID)
+			kill -9 PID
+
+		- Foreground Process와 Background Process ( TTY 항목에서 확인)
+			첫번째 터미널에서 yes 프로그램 실행
+			두번째 터미널에서 ps -e | grep yes
+				ps -e | grep ssh
+
+			종료 방법
+				현재 실행 중인 창에서 ctrl + c 로 강제 종료
+				다른 터미널창에서 kill PIP 를 이용해서 강제 종료
+
+
+			
+			첫번째 창에서 yes > /dev/null
+			두번째 창에서 ps -e | grep yes, 	kill PID
+
+		- df (마운트된 디스크 정보)
+			df -m
+
+		- du(디스크 사용량)
+			du /home
+			
+			전체 합계만 확인하고자 하는 경우
+			du -sk /home
+			du -skm /home
+
+		- free (메모리 사용량)
+			free -m
+
+		- vmstat
+			vmstat 1
+
+
+	9) Shell Script
+		vi name.sh
+		i 입력
+		종료할 때는 esc
+		:wq (write quit)
+
+		실행 방법
+			- /bin/sh 를 이용하는 방법
+				sh name.sh
+
+			- chmod를 이용하는 방법
+				chmod 766 name.sh
+				./name.sh
+
+
+3. Hadoop
+(1) 준비사항
+	1) HadoopLab 폴더 생성
+	2) 리눅스 서버 3대 준비 : Primary, Second1, Second2
+	3) Primary Setting
+		- putty로 연결
+		- Java 설치
+			java -version
+			which java
+			rpm, yum : 프로그램 관리 패키지
+			rpm -qa | grep jdk
+			rpm -qa | grep java
+
+			yum remove java*
+		
+			cd /home/user1
+
+			압축풀기
+				tar    -cvf    파일명.tar    압축할 대상
+				tar    -xvf    파일명.tar    압축풀 위치	
+				tar    -zxvf   파일명.tar.gz
+
+			rm 삭제할 파일명
+
+			디렉토리명 바꾸기
+			mv      jdk-11.0.8     jdk11
+
+		- 환경변수 설정
+			/etc/profile
+			/etc/bashrc
+			~/.bashrc
+			~/.bashrc_profile
+
+			vi /etc/profile
+			---------------------
+			export JAVA_HOME=/home/user1/jdk11
+			export PATH=$PATH:$JAVA_HOME/bin
+			export JAVA_OPTS="-Dfile.encoding=UTF-8"
+			export CLASSPATH="."
+
+			source /etc/profile
+			java -version
+			javac
+
+(2) 특징
+	1) 대용량 데이터를 분산처리할 수 있는 자바 기반의 오픈 소스 Framework
+	2) 더그 커팅이 구글의 논문(2003년 "The Google File System", 2004년 "MapReduce;Simplified Data Processing on Large Cluster")을 참조하여 구현함.
+	3) http://hadoop.apache.org
+
+
+(3) 관련 용어
+	1) HDFS(Hadoop Distributed File System)
+		대용량 파일을 분산된 서버에 설치하고 많은 클라이언트가 저장된 데이터를 빠르게 처리할 수 있게 설계된
+		파일 시스템
+
+	2) NameNode
+		HDFS의 모든 메타데이터를 관리하고 클라이언트가 HDFS에 저장된 파일에 접근할 수 있도록 처리하는 노드
+
+	3) DataNode
+		HDFS에 데이터를 입력하면 입력데이터는 32MB의 블럭으로 나눠져서 여러 대의 데이터 노드에 분산되어
+		저장된다.(버전업에 따라 128MB일 수도 있다.)
+	4) MapReduce
+		map과 reduce라는 두 개의 method로 구성됨.
+		대규모 분산 컴퓨팅 혹은 단일 컴퓨팅 환경에서 대량의 데이터를 병렬로 분석할 수 있는 알고리즘
+	5) JobTracker
+		하둡 클러스터에 등록된 전체 job의 스케줄링을 관리하고 모니터링하는 노드
+	6) Mapper
+		맵리듀스 프로그래밍 모델에서 map method의 역할을 수행하는 클래스
+		키와 값으로 구성된 입력 데이터를 전달 받아 이 데이터를 가공하고 분류해서 새로운 데이터를 생성함
+	7) Reducer
+		맵리듀스 프로그래밍 모델에서 reducer method의 역할을 수행하는 클래스
+		map task의 출력 데이터를 입력 데이터로 전달받아 집계 연산을 수행
+	8) YARN(Yet Another Resource Negotiator)
+		맵리듀스의 차세대 기술, 맵리듀스의 확장성과 속도 문제를 해소하기 위해 개발된 프로젝트
+
+
+(4) 설치
+	1) hadoop-2.10.1.tar.gz 다운로드
+	2) 받은 파일을 리눅스 서버(Primary)의 /home/user1 에 업로드
+	3) 압축 풀기
+		tar -zxvf hadoop-2.10.1.tar.gz
+	4) 환경 설정 : vi /etc/profile
+		export HADOOP_HOME=/home/user1/hadoop2
+		export PATH=$PATH:$JAVA_HOME/bin:$HADOOP_HOME/bin:$HADOOP_HOME/sbin
+
+		export HDFS_NAMENODE_USER="root"
+		export HDFS_DATANODE_USER="root"
+		export HDFS_SECONDARYNAMENODE_USER="root"
+		export YARN_RESOURCEMANAGER_USER="root"
+		export YARN_NODEMANAGER_USER="root"
+		------------------------------------------------------------------------------------------
+		source /etc/profile
+
+		reboot
+
+		hadoop version
+
+(5) 사용 방법
+	1) Single Node, Stand Alone (단독 모드) : 테스트용
+	2) Single Node Cluster(의사 분산 모드) : 테스트용
+	3) Multi Node Cluster(완전 분산 모드) : 운영 모드
+
+
+(6) 단독 모드
+	hadoop jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.10.0.jar wordcount  $HADOOP_HOME/etc/hadoop/hadoop-env.sh wordcount_output
+
+	cd wordcount_output
+	cat part-r-00000
+
+(7) 의사 분산 모드
+	1) 비밀키와 공개키를 생성
+		ssh-keygen -t rsa -P ""
+
+		ls -al : .ssh 디렉토리 검색해서 두 개의 파일이 있는 것을 확인
+
+		공개키를 ssh의 인증키로 등록
+		cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+
+		ssh localhost
+
+	2) vi $HADOOP_HOME/etc/hadoop/hadoop-env.sh
+		export JAVA_HOME=/home/user1/jdk11
+
+	3) vi $HADOOP_HOME/etc/hadoop/core-site.xml
+		<configuration>
+			<property>
+				<name>fs.defaultFS</name>
+				<value>hdfs://localhost:9000</value>
+			</property>
+		</configuration>
+
+	4) vi $HADOOP_HOME/etc/hadoop/hdfs-site.xml : 큰 파일을 올렸을 때 몇 개 파일로 나눌것인지에 대한 설정
+		<configuration>
+			<property>
+				<name>dfs.replication</name>
+				<value>1</value>
+			</property>
+		</configuration>
+
+	5) 네임 노드 포맷
+		hdfs namenode -format
+
+	6) 하둡 클러스터 시작(하둡 분산 파일 시스템 시작)
+		start-dfs.sh
+
+	7) jps로 확인
+		jps
+		-------
+		NameNode
+		DataNode
+		SecondaryNameNode
+
+	8) 웹브라우저로 모니터링
+		http://192.168.10.1:50070
+
+		방화벽 개방
+		firewall-cmd --zone=public --add-port=50070/tcp --permanent
+		firewall-cmd --reload
+
+	9) YARN 실행
+		start-yarn.sh
+		jps
+		---------------
+		ResourceManager
+		NodeManager
+
+	10) 분석 프로그램 실행(wordcount)
+		- hdfs에 대한 테스트
+			hdfs dfs -mkdir /user
+			hdfs dfs -ls /	
+
+			hdfs dfs -mkdir /user/root
+			hdfs dfs -mkdir /user/root/conf
+
+			hdfs dfs -ls -R /
+
+			hdfs dfs -mkdir /input
+
+			input 디렉토리에 README.txt 파일을 업로드
+			hdfs dfs -copyFromLocal $HADOOP_HOME/README.txt /input
+
+			hdfs dfs -ls /input
+
+			hadoop jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.10.0.jar wordcount  /input/README.txt /user/root/wordcount_output
+
+			hdfs dfs -ls /user/root/wordcount_output
+
+			hdfs dfs -cat /user/root/wordcount_output/part-r-00000
+
+	11) 종료
+		stop-dfs.sh
+		jps
+		stop-yarn.sh
+		jps
+
+
+(8) 완전 분산 모드
+	1) 시스템 구성
+		- host os : window10
+		- virtual machine : virtualbox
+			ip : 192.168.10.1
+		- guest os : Primary
+			ram : 4g
+			hdd : 40g
+			ip1 : 10.0.2.15
+			ip2 : 192.168.10.10
+		- guest os : Secondary1
+			ram : 2g
+			hdd : 40g
+			ip : 192.168.10.11
+		- guest os : Secondary2
+			ram : 2g
+			hdd : 40g
+			ip : 192.168.10.12
+
+	2) 각 Guest OS의 IP 설정
+		- Primary에 랜카드를 하나 더 추가
+			virtualbox관리자 > 파일 > 호스트 네트워크 관리자 > 만들기(DHCP서버 체크 해제)
+			Primary 선택 후 설정 > 네트워크 > 어댑터2 선택 > 네트워크 어댑터 사용하기에 체크
+				, 호스트 전용 어댑터 선택, 추가한 어댑터#2 선택
+
+			Secondary1, Secondary2 모두 호스트 전용 어댑터 선택, 추가한 어댑터#2 선택
+
+			서버 3대 가동
+
+		- Primary 연결(putty)
+			cd /etc/sysconfig/network-scripts/
+			cat ifcfg-enp0s3
+			
+			vi ifcfg-enp0s8(새로 생성)
+			----------------------
+			DEVICE=enp0s8
+			ONBOOT=yes
+			BOOTPROTO=static
+			IPADDR=192.168.10.10
+			NETMASK=255.255.255.0
+			----------------------------
+
+			systemctl restart network
+			ifconfig
+
+		- 나머지 Secondary도 동일(IP만 다르게 설정)
+			vi ifcfg-enp0s3
+
+		- 각 서버에서 실행(Ctrl + C로 중지)
+			Primary에서
+				ping 192.168.10.11
+				ping 192.168.10.12
+
+			ssh 192.168.10.11
+			Secondary1에서
+				ping 192.168.10.10
+				ping 192.168.10.12
+
+			exit
+			ssh 192.168.10.12
+			Secondary2에서
+				ping 192.168.10.10
+				ping 192.168.10.11
+
+	3) 각 Guest OS의 host명을 변경(모든 노드에서 실행)
+		- 모든 서버에서 
+			vi /etc/hosts
+			--------------
+			127.0.0.1 localhost
+			192.168.10.10 primary
+			192.168.10.11 second1
+			192.168.10.12 second2
+
+		- hosts와 hostname을 일치시키는 작업
+			- Primary에서
+				vi /etc/hostname
+				-------------------
+				primary
+				-------------------
+
+				/bin/hostname -F /etc/hostname
+				reboot
+
+			- Secondary1에서
+				vi /etc/hostname
+				-------------------
+				second1
+				-------------------
+
+				/bin/hostname -F /etc/hostname
+				reboot
+
+
+			- Secondary2에서
+				vi /etc/hostname
+				-------------------
+				second2
+				-------------------
+
+				/bin/hostname -F /etc/hostname
+				reboot
+
+		- 확인
+			각 서버에서 hostname 실행
+			각 서버에서 ping test
+				primary에서는
+					ping second1
+					ping second2 
+
+
+
+		- 접속 테스트(모든 노드에서)
+			ssh primary
+			exit
+			ssh second1
+			exit
+			ssh second2
+			exit
+			-----------------------------
+			scp -rp ~/.ssh/authorized_keys  root@second1:~/.ssh/authorized_keys
+			scp -rp ~/.ssh/authorized_keys  root@second2:~/.ssh/authorized_keys
+
+
+	4) Hadoop Setting
+		- vi $HADOOP_HOME/etc/hadoop/hadoop-env.sh 수정 (Primary에서만)
+			기존 코드 중
+			export HADOOP_PID_DIR=/home/user1/hadoop2/pids
+
+		- vi $HADOOP_HOME/etc/hadoop/core-site.xml (모든 노드에서)
+			<configuration>
+				<property>
+					<name>fs.defaultFS</name>
+					<value>hdfs://localhost:9000</value>
+				</property>
+			</configuration>
+
+		- vi $HADOOP_HOME/etc/hadoop/hdfs-site.xml 수정
+			Primary에서
+				하둡 홈 디렉토리에 namenode와  datanode 디렉토리 생성
+				cd $HADOOP_HOME
+				mkdir namenode
+				mkdir datanode
+
+				chmod 777 namenode
+				chmod 777 datanode
+
+			나머지 Secondary에서는 datanode 만 생성
+				cd $HADOOP_HOME
+				mkdir datanode
+				chmod 777 datanode
+
+			vi $HADOOP_HOME/etc/hadoop/hdfs-site.xml ( Primary에서만)
+			-----------------------------------------------------------------------
+				<configuration>
+					<property>
+						<name>dfs.replication</name>
+						<value>2</value>
+					</property>
+					<property>
+						<name>dfs.permissions</name>
+						<value>false</value>
+					</property>
+					<property>
+						<name>dfs.namenode.name.dir</name>
+						<value>file:/home/user1/hadoop2/namenode</value>
+					</property>
+					<property>
+						<name>dfs.datanode.data.dir</name>
+						<value>file:/home/user1/hadoop2/datanode</value>
+					</property>
+				</configuration>
+
+			vi $HADOOP_HOME/etc/hadoop/hdfs-site.xml ( 나머지 Secondary에서)
+			-------------------------------------------------------------------------------
+				<configuration>
+					<property>
+						<name>dfs.replication</name>
+						<value>2</value>
+					</property>
+					<property>
+						<name>dfs.permissions</name>
+						<value>false</value>
+					</property>
+					<property>
+						<name>dfs.datanode.data.dir</name>
+						<value>file:/home/user1/hadoop2/datanode</value>
+					</property>
+				</configuration>
+
+
+		- Job Tracker 설정(모든 노드에서)
+			$HADOOP_HOME/etc/hadoop/mapred-site.xml 수정
+			cd $HADOOP_HOME/etc/hadoop/ 에서 조회
+			cp mapred-site.xml.template  mapred-site.xml
+
+			vi mapred-site.xml
+			------------------------
+				<property>
+					<name>mapreduce.framework.name</name>
+					<value>yarn</value>
+				</property>
+
+
+			vi yarn-site.xml
+			--------------------
+				<property>
+					<name>yarn.nodemanager.aux-services</name>
+					<value>mapreduce_shuffle</value>
+				</property>
+				<property>
+					<name>yarn.nodemanager.aux-services.mapreduce.shuffle.class</name>
+					<value>org.apache.hadoop.mapred.ShuffleHandler</value>
+				</property>
+
+
+		- masters, slaves 파일 편집(Primary에서만 작업)
+			cd $HADOOP_HOME/etc/hadoop/
+			
+			vi masters
+			--------------
+			primary
+
+
+			vi slaves
+			--------------
+			primary
+			second1
+			second2
+
+		- 방화벽을 내림(모든 노드에서)
+			systemctl stop firewalld.service
+			systemctl disable firewalld.service
+
+		
+	5) 하둡 실행
+		- 네임노드 포맷 (Primary에서만)
+			hdfs namenode -format
+
+			start-dfs.sh
+			
+			Primary에서 확인
+			jps : NameNode, SecondaryNameNode, DataNode
+
+			Secondary에서
+			jps : DataNode
+
+			start-yarn.sh
+			
+			Primary : NameNode, SecondaryNameNode, DataNode, NodeManager, ResourceManager
+			Secondary : DataNode, NodeManager
+
+			웹에서 모니터링 툴 실행
+			http://192.168.10.1:50070
+		
+
+		- DataNode가 올라오지 않을 경우
+			stop-dfs.sh
+			stop-yarn.sh
+
+			Secondary에서
+			rm -rf $HADOOP_HOME/datanode
+			mkdir $HADOOP_HOME/datanode
+			chmod 777 $HADOOP_HOME/datanode
+
+			Primary에서
+			rm -rf $HADOOP_HOME/namenode
+			rm -rf $HADOOP_HOME/datanode
+
+			mkdir $HADOOP_HOME/namenode
+			mkdir $HADOOP_HOME/datanode
+
+			chmod 777 $HADOOP_HOME/namenode
+			chmod 777 $HADOOP_HOME/datanode
+
+			hdfs namenode -format
+
+		- Host key verification failed 에러 발생시
+			각 계정 폴더에서 known_hosts 파일 삭제
+			rm ~/.ssh/known_hosts
+
+		- 중지
+			stop-dfs.sh
+			stop-yarn.sh
+			
+	6) 활용 테스트 : 분석 프로그램 실행(wordcount)
+		hdfs dfs -mkdir /user
+		hdfs dfs -mkdir /user/root
+		hdfs dfs -mkdir /user/root/conf
+
+		hdfs dfs -ls -R /  또는 hdfs dfs -lsr /
+ 
+		- 파일 업로드
+			hdfs dfs -copyFromLocal  원본파일  복사할 경로
+			hdfs dfs -put  원본파일   복사할 파일
+
+			hdfs dfs -mkdir /input
+			hdfs dfs -put $HADOOP_HOME/README.txt  /input/README.txt
+			hdfs dfs -ls /input
+
+			hadoop jar $HADOOP_HOME/share/hadoop/mapreduce/hadoop-mapreduce-examples-2.10.0.jar wordcount  /input/README.txt  /user/root/wordcount_output
+
+			hdfs dfs -ls /user/root/wordcount_output
+
+			hdfs dfs -cat /user/root/wordcount_output/part-r-00000
+
+			결과값을 다운로드
+			hdfs dfs -copyToLocal /user/root/wordcount_output/part-r-00000  ~/result.txt
+
+
+		- MapReduce 예
+			입력 데이터 : 
+				read a book
+				write a book
+
+			Map:
+				1    read a book
+				2    write a book
+
+			Shuffle : (정렬과 병합)
+				<read, 1>
+				<a, 1>
+				<book, 1>
+				<write, 1>
+				<a, 1>
+				<book, 1>
+
+			Reduce :
+				<read, (1)>
+				<a, (1, 1)>
+				<book, (1, 1)>
+				<write, (1)>
+
+
+	7) HDFS 명령어 : hdfs dfs -명령어
+		- 도움말
+			hdfs dfs -help
+			hdfs dfs -help copyToLocal
+
+		- 목록 보기
+			hdfs dfs -ls 경로
+			hdfs dfs -ls  : 경로를 지정하지 않으면 사용자 홈 디렉토리 
+			hdfs dfs -ls -R : 하위 디렉토리까지 조회
+
+		- 파일 용량 확인
+			hdfs dfs -du /
+			hdfs dfs -du -s /  :  전체 합계 용량
+
+		- 파일 내용 보기 : cat, text
+			cat : 텍스트 파일 전용
+			text : 텍스트 파일과 압축파일도 읽을 수 있다.
+
+		- 디렉토리 생성
+			hdfs dfs -mkdir 디렉토리명
+
+		- 파일 복사
+			업로드
+				hdfs dfs -put
+				hdfs dfs -copyFromLocal
+
+			다운로드
+				hdfs dfs -get
+				hdfs dfs -copyToLocal
+
+			여러 개의 파일을 하나로 합쳐서 다운로드 : getmerge  하둡분산파일   로컬시스템파일
+				hdfs dfs -getmerge  /user/root/wordcount_output  wo
+
+		- 파일 이동 : 하둡 분산파일시스템 안에서 파일을 옮길 때
+			hdfs dfs -mv 이동전 경로   이동 후 경로
+			hdfs dfs -moveFromLocal  로컬 경로    하둡경로
+			
+		- 카운트 값 조회
+			hdfs dfs -count 파일경로
+			hdfs dfs -count /
+			----------------------
+			디렉토리 갯수	파일 갯수		파일 사이즈
+
+		- 파일 내용 일부분 확인
+			hdfs dfs -tail  파일명
+			hdfs dfs -head  파일명
+			hdfs dfs -cat 파일명 | head  -10 또는 tail  -10
+		
+		- 권한 변경
+			hdfs dfs -chmod 숫자 [디렉토리 또는 파일]
+
+		- 파일 생성(0바이트)
+			hdfs dfs -touchz  파일명
+		
+
+(9) 항공 운항 데이터
+	1) http://stat-computing.org/dataexpo/2009
+		- 1987년 ~ 2008년 21년간 미국 항공 운항 데이터
+		- 2006년~2008년까지의 3년간 데이터를 활용
+
+	2) MySQL
+		mysql -uroot -p1111
+		
+		create database airline;
+		use airline;
+
+		create table ontime(
+			Year int,		-- 연도
+			Month int,	-- 월	
+			DayofMonth int,
+			DayofWeek int,
+			DepTime int,	-- 실제 출발 시간
+			CRSDepTime int,
+			ArrTime int,	-- 실제 도착 시간
+			CRSArrTime int,
+			UniqueCarrier varchar(5),  -- 항공사 코드
+			FlightNum int,
+			TailNum varchar(8),
+			ActualElapsedTime int,
+			CRSElapsedTime int,
+			AirTime int,
+			ArrDelay int,		-- 도착 지연 시간
+			DepDelay int,		-- 출발 지연 시간
+			Origin varchar(3),
+			Dest varchar(3),
+			Distance int,	-- 비행 거리(마일 기준)
+			TaxiIn int,
+			TaxiOut int,
+			Cancelled int,
+			CancellationCode varchar(1),
+			Diverted varchar(1),
+			CarrierDelay int,
+			WeatherDelay int,
+			NASDelay int,
+			SecurityDelay int,
+			LateAircraftDelay int
+			);
+
+		csv파일을 db로 import 하기위한 접속
+		현재 위치를 airline폴더가 있는 곳으로 이동
+		mysql --local-infile -uroot -p1111 airline
+
+		LOAD DATA 
+			LOCAL INFILE 'C:/netsong7/bigdata/airline/2006.csv'
+			INTO TABLE ontime
+			FIELDS TERMINATED BY ','
+			LINES TERMINATED By '\n';
+		
+		LOAD DATA 
+			LOCAL INFILE 'C:/netsong7/bigdata/airline/2007.csv'
+			INTO TABLE ontime
+			FIELDS TERMINATED BY ','
+			LINES TERMINATED By '\n';
+
+		LOAD DATA 
+			LOCAL INFILE 'C:/netsong7/bigdata/airline/2008.csv'
+			INTO TABLE ontime
+			FIELDS TERMINATED BY ','
+			LINES TERMINATED By '\n';
+
+		select * from ontime where year=0;    // 3 rows in set (27.40 sec)
+		
+		delete from ontime where year=0;	
+	
+		*. ERROR 1206 (HY000): The total number of locks exceeds the lock table size
+		-------------------------------------------------------------------------------------------
+		# show variables like '%infile%';
+		my.ini파일 수정 (C:\ProgramData\MySQL\MySQL Server 5.7\my.ini)
+			[mysql]
+			..
+			local-infile=1
+
+			[mysqld]
+			...
+			local-infile=1
+			...
+			innodb_buffer_pool_size=64M
+			...
+
+		서비스 다시 실행
+			실행 > services.msc
+
+		mysql 다시 접속
+			use airline;
+			
+			delete from ontime where year=0;	// (31.50 sec)
+
+			select count(*) from ontime;   //  21604865 (24.83 sec)
+
+			select * from ontime limit 10;
+
+		- 출발 지연 데이터 분석
+			select year, month, count(*) from ontime
+				where depdelay>0 group by year, month order by year, month;    // (26.16 sec)
+
+
+	3) Hadoop
+		airline 폴더를 /home/user1/ 에 업로드
+		cd /home/user1
+		
+		hdfs dfs -put airline /input
+		hdfs dfs -ls /input/airline
+
+		hadoop jar Hadoop.jar airline.DepartureDelayCount  /input/airline  /input/dep_delay_count
+
+		hdfs dfs -cat /input/dep_delay_count/part-r-00000
+
+
+4. Hive
+	- 하둡 기반에서 실행되는 라이브러리
+	- 자바 코드대신 SQL구문 사용(HiveQL)
+	- Hive2까지는 SQL문법 사용
+	- delete 기능이 없기 때문에 데이터 지울 때 drop으로 지운 뒤 다시 생성
+	- 일반 DataBase와 연동
+	- Facebook에서 활용
+
+
+5. Pig
+	- 야후에서 개발, 트위터에서 활용
+	- 스크립트 언어(PigLatin)
+
+
+6. 스파크(Spark)
+(1) 설치
+	1) 프로그램 준비
+		- http://spark.apache.org 에서 다운로드
+		- 압축 풀기 : tar zxvf 스파크
+		- 디렉토리명은 spark 변경 : mv spark-xxx spark 
+
+	2) 환경 변수 설정
+		vi /etc/profile
+		-----------------
+		export SPARK_HOME=/home/user1/spark
+		export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+		------------------------------------------------------------------
+		source /etc/profile
+		reboot
+
+*. http://aws.amazon.com
+*. https://databricks.com/try-databricks
+
+
+	3) 테스트
+		spark-shell : scala언어 사용
+			sc : SparkContext
+			spark : SparkSession
+			3+4
+			ctrl + c
+
+		pyspark : python 언어 사용
+			sc
+			spark
+			3+4
+			exit()
+
+		spark-sql : sql 언어 사용
+			select 3+4;
+			ctrl + c
+
+(2) 운영
+	1) Spark StandAlone
+		내부 메모리 확인
+		free -g
+		
+		코어 수 확인
+		grep -c processor /proc/cpuinfo
+
+		- cd $SPARK_HOME/conf
+		cp spark-env.sh.template spark-env.sh
+		vi spark-env.sh
+		---------------------------------------------
+		export SPARK_WORKER_INSTANCES=3
+		---------------------------------------------
+		
+		start-master.sh
+		jps
+
+		http://192.168.10.1:8080
+
+		start-slave.sh spark://primary:7077 -m 512m -c 1
+		jps
+		
+		중지
+		stop-slave.sh
+		stop-master.sh
+
+
+(3) 클라우드 활용 
+	1) Databricks
+		- https://databricks.com/try-databricks에서 가입
+		- https://community.cloud.databricks.com
+	2) MS Asure HDinsight
+
+
+
+(4) Spark의 데이터 관리 방법
+	1) RDD(2011)
+		- 저수준 API
+		- Lazy Evaluation
+			Transformation
+				map(), filter(), flatmap(), sample(), groupByKey(), reduceByKey(), sort(), ...
+			Action
+				count(), collect(), reduce(), lookup(), save(), ...
+		- 함수 위주의 연산
+		- schemaless
+	2) DataFrame(2013)
+		- 고수준 API
+		- schema 존재
+		- UDF(User Define Function) 지원
+	3) DataSet(2015)
+		- 고주준 API
+		- java, scalar
+
+
+
+
+
+
+
+
+
+
+
+
+		
